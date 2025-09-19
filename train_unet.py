@@ -5,28 +5,26 @@ print("U-Net Training started!")
 import numpy as np
 import torch
 import torch.nn as nn
-import matplotlib.pyplot as plt
-from netCDF4 import Dataset
 from tqdm import tqdm
-import torch.nn.functional as F
 from sklearn.metrics import r2_score as R2
-from sklearn.model_selection import KFold, train_test_split
-from sklearn.metrics import r2_score as r2
 from copy import deepcopy
 import utils
 from unet import UNet_nobatchnorm
 from scipy.stats import pearsonr
 import helper_functions as hf
-torch.cuda.set_device(0)
 import os
 import psutil
 
 ######## PARAMETERS ###########
 
-maxEpochs = 1500 # Training epochs
+maxEpochs = 10 # Training epochs (Set to 10 for testing)
 Nbase = 64 # depth of the UNet
 
 depth_levels = 42 # depth levels of the output data (output channels) 
+model_checkpoint_file = './' # Path to save checkpoint of the U-Net
+
+###############################
+
 
 # select the region
 lon_min = -75
@@ -53,11 +51,16 @@ def log_memory(msg=""):
 def run_model(var_input_names, var_output_names, save_fn_prefix, N_inp, N_out, mean_input, mean_output, var_input, var_output):
     #function to move data from CPU to GPU memory
     def totorch(x):
-        return torch.tensor(x, dtype = torch.float).cuda()
+        if torch.cuda.is_available():
+            return torch.tensor(x, dtype = torch.float).cuda()
+        else:
+            return torch.tensor(x, dtype = torch.float)
     #main definition of the UNet. This is a standard UNet unit with no batchnorm layers. Nbase controls how deep the network is. You can
     #investigate the effects of Nbase, or other parameters, such as the way pooling is done for the downsampling layers in UNet_nobatchnorm.
-    model = UNet_nobatchnorm(N_inp, N_out, bilinear = True, Nbase = Nbase).cuda()
-
+    if torch.cuda.is_available():
+        model = UNet_nobatchnorm(N_inp, N_out, bilinear = True, Nbase = Nbase).cuda()
+    else:
+        model = UNet_nobatchnorm(N_inp, N_out, bilinear = True, Nbase = Nbase)
     input = torch.randn(1,N_inp,max_height-min_height,max_width-min_width).to(device) #a fake piece of data with the same sizes as a snapshot of the training data. This is just
     
     #to estimate the size of the UNet. 
@@ -85,7 +88,8 @@ def run_model(var_input_names, var_output_names, save_fn_prefix, N_inp, N_out, m
     perm = False
 
     model_best = deepcopy(model)  # Initialize before the training loop 
-
+    corrs = []
+    pvals = []
     print('Starting training loop')
     for epoch in tqdm(range(maxEpochs)):
         #Set the learning rate annealing scheme 
@@ -157,13 +161,8 @@ def run_model(var_input_names, var_output_names, save_fn_prefix, N_inp, N_out, m
 
     #save trained model
     print(out_mod.shape, 'outout model shape')
-    dr = '/work/uo0780/u302044/project_unet_ehf/trained_models/vvel' 
-    try:
-        os.mkdir(dr)
-    except:
-        print('Directory exists or disk full...')
     fstr = f'{save_fn_prefix}_{Nbase}_{lr0}_{batch_size}_{depth_levels}'
-    PATH = dr + f'/Debug_Unet_{fstr}_whole_year.pth'
+    PATH = model_checkpoint_file + f'Debug_Unet_{fstr}.pth'
     torch.save({
         'epoch': epochmin[-1] if epochmin else None,  # Best epoch
         'model_state_dict': model_best.state_dict(),

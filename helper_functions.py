@@ -1,21 +1,23 @@
-from netCDF4 import Dataset
 import numpy as np
 import xarray as xr
 import calendar
 from unet import UNet_nobatchnorm
 import torch
-import os
-import pandas as pd
-from datetime import datetime, timedelta
-from sklearn.metrics import r2_score
-import warnings
-from scipy.linalg import eigh_tridiagonal
-import matplotlib.pyplot as plt
-import seaborn as sns
-import colorcet as cc
-import gsw
+import argparse
 
-def list_files(uvel=False, vvel=False, temp=False):
+######### PARAMETERS ############
+ssh_path_file = "" # Path to ssh data files
+temp_path_file = "" # Path to temprature data files
+vvel_path_file = "" # Path to meridional velocity data files
+uvel_path_file = "" # Path to zonal velocity data files
+#################################
+
+# Argument parser
+parser = argparse.ArgumentParser(description="Train U-Net model.")
+parser.add_argument('--dummy', action='store_true', help="Use dummy data instead of real data")
+args = parser.parse_args()
+
+def list_files(uvel=False, vvel=False, temp=False, dummy=True):
     """
     This function returns one whole year (2007) of daily data as the training set 
     and 4 months (January, April, July, of next year (2008) as the testing set
@@ -28,36 +30,40 @@ def list_files(uvel=False, vvel=False, temp=False):
 
     The paths and file names should be adapted to the users dataset
     """
-    
-    ssh_path_file = "" # Path to ssh data files
-    temp_path_file = "" # Path to temprature data files
-    vvel_path_file = "" # Path to meridional velocity data files
-    uvel_path_file = "" # Path to zonal velocity data files
-    
 
     train_files = []
     test_files = []
 
-    # TRAIN SET
-    for year in range(2007, 2008):  # Covers 2007
-        for month in range(1, 13):  # Months from 1 to 12
-            num_days = calendar.monthrange(year, month)[1]
-            for day in range(1, num_days + 1): # Looping up to the correct number of days in the month
-                day_str = f"{day:02d}"  # Format day as two digits (01, 02, ..., 31)
-                month_str = f"{month:02d}"  # Format month as two digits (01, 02, ..., 12)
-            
-                ssh_filename = f"{ssh_path_file}SSH_t.cfc11.{year}{month_str}{day_str}.nc"
-                temp_filename = f"{temp_path_file}TEMP_t.cfc11.{year}{month_str}{day_str}.nc"
+    if args.dummy:
+        ssh_filename = f"./dummy_dataset/SSH_t.cfc11.20070101.nc"
+        temp_filename = f"./dummy_dataset/TEMP_t.cfc11.20070101.nc"  
+        vvel_filename = f"./dummy_dataset/VVEL_t.cfc11.20070101.nc"
                 
-                vvel_filename = f"{vvel_path_file}VVEL_t.cfc11.{year}{month_str}{day_str}.nc"
-                uvel_filename = f"{uvel_path_file}UVEL_t.cfc11.{year}{month_str}{day_str}.nc"
+        train_files.append(ssh_filename)
+        train_files.append(temp_filename)
+        train_files.append(vvel_filename)
+        ssh_filename = f"./dummy_dataset/SSH_t.cfc11.20080101.nc"
+        temp_filename = f"./dummy_dataset/TEMP_t.cfc11.20080101.nc"  
+        vvel_filename = f"./dummy_dataset/VVEL_t.cfc11.20080101.nc"
                 
-                if uvel and vvel:
-                    train_files.append(ssh_filename)
-                    train_files.append(temp_filename)
-                    train_files.append(uvel_filename)
-                    train_files.append(vvel_filename)
-                else:
+        test_files.append(ssh_filename)
+        test_files.append(temp_filename)
+        test_files.append(vvel_filename)
+    else:
+        # TRAIN SET
+        for year in range(2007, 2008):  # Covers 2007
+            for month in range(1, 13):  # Months from 1 to 12
+                num_days = calendar.monthrange(year, month)[1]
+                for day in range(1, num_days + 1): # Looping up to the correct number of days in the month
+                    day_str = f"{day:02d}"  # Format day as two digits (01, 02, ..., 31)
+                    month_str = f"{month:02d}"  # Format month as two digits (01, 02, ..., 12)
+
+                    ssh_filename = f"{ssh_path_file}SSH_t.cfc11.{year}{month_str}{day_str}.nc"
+                    temp_filename = f"{temp_path_file}TEMP_t.cfc11.{year}{month_str}{day_str}.nc"
+
+                    vvel_filename = f"{vvel_path_file}VVEL_t.cfc11.{year}{month_str}{day_str}.nc"
+                    uvel_filename = f"{uvel_path_file}UVEL_t.cfc11.{year}{month_str}{day_str}.nc"
+
                     if uvel:
                         output_filename = uvel_filename  
                     elif vvel:
@@ -69,25 +75,20 @@ def list_files(uvel=False, vvel=False, temp=False):
                     train_files.append(temp_filename)
                     train_files.append(output_filename)
 
-    # TEST SET
-    for year in range(2008, 2009):
-        for month in range(1, 13, 3):
-            num_days = calendar.monthrange(year, month)[1]
-            for day in range(1, num_days + 1):  # Looping up to the correct number of days in the month
-                day_str = f"{day:02d}"  # Format day as two digits (01, 02, ..., 31)
-                month_str = f"{month:02d}"  # Format month as two digits (01, 02, ..., 12)
-            
-                ssh_filename = f"/work/uo0780/u302044/POPCFC/YEARLY/SSH/SSH_t.cfc11.{year}{month_str}{day_str}.nc"
-                temp_filename = f"/work/uo0780/u302044/POPCFC/YEARLY/TEMP/TEMP_t.cfc11.{year}{month_str}{day_str}.nc"
-                ehf_filename = f"/work/uo0780/u302044/POPCFC/YEARLY/EDDYFLUXES/UVPTEMPP_{year}{month_str}{day_str}.nc"
-                vvel_filename = f"/work/uo0780/u241194/u241194/POPCFC/DATANC/VVEL_t.cfc11.{year}{month_str}{day_str}.nc"
-                uvel_filename = f"/work/uo0780/u241194/u241194/POPCFC/DATANC/UVEL_t.cfc11.{year}{month_str}{day_str}.nc"
-                if uvel and vvel:
-                    test_files.append(ssh_filename)
-                    test_files.append(temp_filename)
-                    test_files.append(uvel_filename)
-                    test_files.append(vvel_filename)
-                else:
+        # TEST SET
+        for year in range(2008, 2009):
+            for month in range(1, 13, 3):
+                num_days = calendar.monthrange(year, month)[1]
+                for day in range(1, num_days + 1):  # Looping up to the correct number of days in the month
+                    day_str = f"{day:02d}"  # Format day as two digits (01, 02, ..., 31)
+                    month_str = f"{month:02d}"  # Format month as two digits (01, 02, ..., 12)
+
+                    ssh_filename = f"/work/uo0780/u302044/POPCFC/YEARLY/SSH/SSH_t.cfc11.{year}{month_str}{day_str}.nc"
+                    temp_filename = f"/work/uo0780/u302044/POPCFC/YEARLY/TEMP/TEMP_t.cfc11.{year}{month_str}{day_str}.nc"
+                    ehf_filename = f"/work/uo0780/u302044/POPCFC/YEARLY/EDDYFLUXES/UVPTEMPP_{year}{month_str}{day_str}.nc"
+                    vvel_filename = f"/work/uo0780/u241194/u241194/POPCFC/DATANC/VVEL_t.cfc11.{year}{month_str}{day_str}.nc"
+                    uvel_filename = f"/work/uo0780/u241194/u241194/POPCFC/DATANC/UVEL_t.cfc11.{year}{month_str}{day_str}.nc"
+                    
                     if uvel:
                         output_filename = uvel_filename  
                     elif vvel:
@@ -96,7 +97,7 @@ def list_files(uvel=False, vvel=False, temp=False):
                         output_filename = temp_filename
                     else:
                         output_filename = ehf_filename
-                
+
                     test_files.append(ssh_filename)
                     test_files.append(temp_filename)
                     test_files.append(output_filename)
@@ -189,7 +190,8 @@ def loaddata_preloaded_test(all_input_data, all_output_data, lim, width):
 
 def convert_to_ij(lon_min, lon_max, lat_min, lat_max):
     # Load dataset
-    ds = xr.open_dataset("/home/u/u302044/dataset/UVEL_t.cfc11.20041109.nc")
+    path = "./dummy_dataset/" if args.dummy else vvel_path_file
+    ds = xr.open_dataset(f"{path}VVEL_t.cfc11.20070101.nc")
 
     # Get the 2D coordinate arrays
     lon_2d = ds.U_LON_2D.values
