@@ -20,17 +20,18 @@ import psutil
 maxEpochs = 10 # Training epochs (Set to 10 for testing)
 Nbase = 64 # depth of the UNet
 
-depth_levels = 42 # depth levels of the output data (output channels) 
+depth_levels = 10 # depth levels of the output data (output channels) 
 model_checkpoint_file = './' # Path to save checkpoint of the U-Net
 
 ###############################
 
 
 # select the region
-lon_min = -75
-lon_max = -55
-lat_min = -65
-lat_max = -55
+lon_min = -100
+lon_max =  100
+lat_min = -50
+lat_max =  50
+
 
 var_ssh = 'SSH' # variable name on nc file for ssh 
 var_temp = 'TEMP' # variable name on nc file for temperature (in our case sst is the depth level 1 of the temperature file)
